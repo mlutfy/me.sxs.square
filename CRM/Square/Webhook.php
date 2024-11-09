@@ -31,7 +31,7 @@ class CRM_Square_Webhook {
         $match_found = FALSE;
         $all_webhooks = [];
         $expect_url = self::getWebhookPath($paymentProcessor['id']);
-        $client = CRM_Square_Utils::connectToSquare($paymentProcessor['user_name']);
+        $client = CRM_Square_Utils::connectToSquare($paymentProcessor);
         $webhooks = self::myListWebhookSubscriptions($client);
 
         foreach ($webhooks as $wh) {

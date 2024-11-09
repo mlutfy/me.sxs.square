@@ -143,7 +143,7 @@ class CRM_Square_Utils {
     $body->setOrder($order);
     $body->setIdempotencyKey(self::generateIdempotencyKey());
 
-    return ($body);
+    return $body;
   }
 
   /**
@@ -282,54 +282,76 @@ class CRM_Square_Utils {
   /**
    * Create invoice from Open Order 
    */
-  public static function myCreateInvoice($paymentProcessor, $orders)
+  public static function myCreateInvoice($paymentProcessor, $order)
   {
       Civi::log()->debug('squareUtils.php::myCreateInvoice');
       Civi::log()->debug('squareUtils.php::myCreateInvoice order date : ' . print_r(date('Y-m-d'), true));
+      $client = self::connectToSquare($paymentProcessor);
       $invoice_payment_request = new \Square\Models\InvoicePaymentRequest();
       $invoice_payment_request->setRequestType('BALANCE');
       $invoice_payment_request->setDueDate(date('Y-m-d'));
       $invoice_payment_request->setAutomaticPaymentSource('NONE');
 
-      $payment_requests = [$invoice_payment_request];
       $accepted_payment_methods = new \Square\Models\InvoiceAcceptedPaymentMethods();
       $accepted_payment_methods->setCard(true);
-      $accepted_payment_methods->setBuyNowPayLater(false);
-      $accepted_payment_methods->setCashAppPay(false);
+      $accepted_payment_methods->setBuyNowPayLater(true);
 
+      $payment_requests = [$invoice_payment_request];
       $invoice = new \Square\Models\Invoice();
-      $invoice->setLocationId($orders->getLocationId());
-      $invoice->setOrderId($orders->getId());
+      $invoice->setLocationId($order->getLocationId());
+      $invoice->setOrderId($order->getId());
       $invoice->setPaymentRequests($payment_requests);
       $invoice->setDeliveryMethod('SHARE_MANUALLY');
-      $invoice->setScheduledAt($orders->getCreatedAt());
+      // $invoice->setScheduledAt($order->getCreatedAt());
       $invoice->setAcceptedPaymentMethods($accepted_payment_methods);
+      $invoice->setStorePaymentMethodEnabled(true);
+
+$body = new \Square\Models\CreateCustomerRequest();
+$body->setGivenName('John');
+$body->setFamilyName('Doe');
+$body->setPhoneNumber('514-555-1234');
+$api_response = $client->getCustomersApi()->createCustomer($body);
+
+if ($api_response->isSuccess()) {
+  $customerResponse = $api_response->getResult();
+} else {
+  $errors = $api_response->getErrors();
+  throw new Exception('Square Create Customer: ' . print_r($errors, 1));
+}
+
+$customerId = $customerResponse->getCustomer()->getId();
+$primary_recipient = new \Square\Models\InvoiceRecipient();
+$primary_recipient->setCustomerId($customerId);
+$invoice->setPrimaryRecipient($primary_recipient);
 
       $body = new \Square\Models\CreateInvoiceRequest($invoice);
       $body->setIdempotencyKey(self::generateIdempotencyKey());
 
-      $client = self::connectToSquare($paymentProcessor);
+      $apiResponse = $client->getInvoicesApi()->createInvoice($body);
 
-      try {
-          $apiResponse = $client->getInvoicesApi()->createInvoice($body);
+      if ($apiResponse->isSuccess()) {
+          $result = $apiResponse->getResult();
+          Civi::log()->debug('squareUtils.php::myCreateInvoice $result : ' . print_r($result, true));
 
-          if ($apiResponse->isSuccess()) {
-              $result = $apiResponse->getResult();
-              Civi::log()->debug('squareUtils.php::myCreateInvoice $result : ' . print_r($result, true));
-
-          } else {
-              $errors = $apiResponse->getErrors();
-              foreach ($errors as $error) {
-                  Civi::log()->debug('squareUtils.php::myCreateInvoice errors ' . 
-                      print_r($error->getCategory(), true) . ' ' . 
-                      print_r($error->getCode(), true) . ' ' .
-                      print_r($error->getDetail(), true));
-              }
-          }
-      } catch (ApiException $e) {
-          Civi::log()->debug('squareUtils.php::myCreateInvoice errors ApiException occurred: ' . 
-              print_r($e->getMessage(), true));
+      } else {
+        $errors = $apiResponse->getErrors();
+        throw new Exception('Square Create Invoice: ' . print_r($errors, 1));
       }
+
+    // Publish the invoice
+    $invoice_id = $result->getInvoice()->getId();
+    $invoice_version = $result->getInvoice()->getVersion();
+    $publishRequest = new \Square\Models\PublishInvoiceRequest($invoice_version);
+    $publishResponse = $client->getInvoicesApi()->publishInvoice($invoice_id, $publishRequest);
+
+    if ($publishResponse->isSuccess()) {
+      $result = $publishResponse->getResult();
+      Civi::log()->debug('myCreateInvoice: publishResponse: ' . print_r($result, 1));
+    }
+    else {
+      $errors = $publishResponse->getErrors();
+      throw new Exception('Square PublishInvoiceRequest Invoice: ' . print_r($errors, 1));
+    }
   }
 
   /**

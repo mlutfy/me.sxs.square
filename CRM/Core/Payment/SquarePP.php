@@ -520,7 +520,7 @@ class CRM_Core_Payment_SquarePP extends CRM_Core_Payment {
     $errorMsg = [];
 
     if (empty($this->_paymentProcessor['user_name'])) {
-      $errorMsg[] = ' ' . ts('ssl_merchant_id is not set for this payment processor');
+      $errorMsg[] = ' ' . ts('Access token is not set for this payment processor');
     }
 
     if (empty($this->_paymentProcessor['url_site'])) {
